@@ -1,0 +1,55 @@
+:root {
+  color-scheme: dark;
+  background: #1748f5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: #1748f5;
+}
+
+body {
+  position: fixed;
+  inset: 0;
+  min-height: 100dvh;
+  font-family: Arial, Helvetica, sans-serif;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#artwork,
+#artwork canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#artwork canvas {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+@media (pointer: coarse) {
+  #artwork canvas {
+    cursor: default;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #artwork canvas {
+    cursor: default;
+  }
+}
