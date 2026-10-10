@@ -65,6 +65,10 @@ const tapGesture = {
   lastTapY: 0,
 };
 
+const touchGuard = {
+  lastTouchAt: -Infinity,
+};
+
 const butterfly = {
   x: 0,
   y: 0,
@@ -93,13 +97,24 @@ function setup() {
 
   canvas.elt.addEventListener("contextmenu", (event) => event.preventDefault());
   canvas.elt.addEventListener("pointerdown", (event) => {
+    const now = millis();
+    if (
+      event.pointerType === "mouse" &&
+      now - touchGuard.lastTouchAt < 1400
+    ) {
+      return;
+    }
+    const touchInput = isTouchInput(event);
+    if (event.pointerType === "touch") {
+      touchGuard.lastTouchAt = now;
+    }
     if (!event.isPrimary) {
       tapGesture.moved = true;
       tapGesture.lastTapAt = -Infinity;
       return;
     }
     if (event.button !== 0 || pointer.down) return;
-    startPointerTap(event);
+    startPointerTap(event, touchInput);
   });
   canvas.elt.addEventListener("pointermove", (event) => {
     registerPointer(event.clientX, event.clientY);
@@ -745,10 +760,19 @@ function registerPointer(x, y) {
   pointer.active = true;
 }
 
-function startPointerTap(event) {
+function isTouchInput(event) {
+  return (
+    event.pointerType === "touch" ||
+    event.sourceCapabilities?.firesTouchEvents === true ||
+    (window.matchMedia("(pointer: coarse)").matches &&
+      window.matchMedia("(hover: none)").matches)
+  );
+}
+
+function startPointerTap(event, touchInput = isTouchInput(event)) {
   pointer.down = true;
   tapGesture.pointerId = event.pointerId;
-  tapGesture.pointerType = event.pointerType;
+  tapGesture.pointerType = touchInput ? "touch" : "mouse";
   tapGesture.startedAt = millis();
   tapGesture.startX = event.clientX;
   tapGesture.startY = event.clientY;
@@ -769,6 +793,9 @@ function endPointerTap(event) {
   if (event.pointerId !== tapGesture.pointerId || !pointer.down) return;
   trackTapMovement(event.clientX, event.clientY);
   const now = millis();
+  if (event.pointerType === "touch") {
+    touchGuard.lastTouchAt = now;
+  }
   pointer.down = false;
   tapGesture.pointerId = null;
 
@@ -805,6 +832,9 @@ function endPointerTap(event) {
 }
 
 function cancelPointerTap() {
+  if (pointer.down && tapGesture.pointerType === "touch") {
+    touchGuard.lastTouchAt = millis();
+  }
   pointer.down = false;
   tapGesture.pointerId = null;
   tapGesture.lastTapAt = -Infinity;
@@ -1173,6 +1203,9 @@ function mouseDragged() {
 }
 
 function touchStarted() {
+  if (touches.length > 0) {
+    touchGuard.lastTouchAt = millis();
+  }
   if (touches.length === 1) {
     registerPointer(touches[0].x, touches[0].y);
   } else if (touches.length > 1) {
