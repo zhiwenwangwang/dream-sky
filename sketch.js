@@ -11,7 +11,10 @@ const DREAM_PARAMS = {
   glyphsPerStrandDesktop: 50,
   glyphsPerStrandMobile: 38,
   glyphsPerStrandReduced: 28,
-  longPressMs: 680,
+  doubleTapMs: 360,
+  tapMaxDurationMs: 280,
+  tapMoveTolerance: 18,
+  doubleTapDistance: 40,
   birdGatherMs: 1900,
   birdHoldMs: 900,
   birdFlightMs: 4600,
@@ -48,8 +51,18 @@ const pointer = {
   active: false,
   down: false,
   lastMove: -10000,
-  holdStartedAt: 0,
-  holdTriggered: false,
+};
+
+const tapGesture = {
+  pointerId: null,
+  pointerType: "mouse",
+  startedAt: 0,
+  startX: 0,
+  startY: 0,
+  moved: false,
+  lastTapAt: -Infinity,
+  lastTapX: 0,
+  lastTapY: 0,
 };
 
 const butterfly = {
@@ -80,13 +93,26 @@ function setup() {
 
   canvas.elt.addEventListener("contextmenu", (event) => event.preventDefault());
   canvas.elt.addEventListener("pointerdown", (event) => {
-    startPointerHold(event.clientX, event.clientY);
+    if (!event.isPrimary) {
+      tapGesture.moved = true;
+      tapGesture.lastTapAt = -Infinity;
+      return;
+    }
+    if (event.button !== 0 || pointer.down) return;
+    startPointerTap(event);
   });
   canvas.elt.addEventListener("pointermove", (event) => {
     registerPointer(event.clientX, event.clientY);
   });
-  window.addEventListener("pointerup", endPointerHold);
-  window.addEventListener("pointercancel", endPointerHold);
+  window.addEventListener("pointermove", (event) => {
+    if (event.pointerId === tapGesture.pointerId) {
+      trackTapMovement(event.clientX, event.clientY);
+    }
+  });
+  window.addEventListener("pointerup", endPointerTap);
+  window.addEventListener("pointercancel", cancelPointerTap);
+  window.addEventListener("blur", cancelPointerTap);
+  canvas.elt.addEventListener("dblclick", (event) => event.preventDefault());
 
   buildGlyphAtlas();
   createLayers();
@@ -190,7 +216,6 @@ function draw() {
   pointer.vy *= pow(0.72, dt);
   pointer.speed *= pow(0.76, dt);
 
-  updateLongPress(now);
   updateButterfly(dt, now);
   updateBirdEvent(now);
   updateRipples(dt);
@@ -340,18 +365,6 @@ function renderTrails(now) {
   }
   ctx.globalAlpha = 1;
   ctx.restore();
-}
-
-function updateLongPress(now) {
-  if (
-    pointer.down &&
-    !pointer.holdTriggered &&
-    birdEvent.phase === "idle" &&
-    now - pointer.holdStartedAt >= DREAM_PARAMS.longPressMs
-  ) {
-    pointer.holdTriggered = true;
-    startBirdEvent(now);
-  }
 }
 
 function startBirdEvent(now) {
@@ -732,20 +745,69 @@ function registerPointer(x, y) {
   pointer.active = true;
 }
 
-function startPointerHold(x, y) {
-  if (pointer.down) {
-    registerPointer(x, y);
+function startPointerTap(event) {
+  pointer.down = true;
+  tapGesture.pointerId = event.pointerId;
+  tapGesture.pointerType = event.pointerType;
+  tapGesture.startedAt = millis();
+  tapGesture.startX = event.clientX;
+  tapGesture.startY = event.clientY;
+  tapGesture.moved = false;
+  registerPointer(event.clientX, event.clientY);
+}
+
+function trackTapMovement(x, y) {
+  if (
+    Math.hypot(x - tapGesture.startX, y - tapGesture.startY) >
+    DREAM_PARAMS.tapMoveTolerance
+  ) {
+    tapGesture.moved = true;
+  }
+}
+
+function endPointerTap(event) {
+  if (event.pointerId !== tapGesture.pointerId || !pointer.down) return;
+  trackTapMovement(event.clientX, event.clientY);
+  const now = millis();
+  pointer.down = false;
+  tapGesture.pointerId = null;
+
+  if (
+    tapGesture.moved ||
+    (tapGesture.pointerType === "touch" &&
+      now - tapGesture.startedAt > DREAM_PARAMS.tapMaxDurationMs) ||
+    birdEvent.phase !== "idle"
+  ) {
+    tapGesture.lastTapAt = -Infinity;
     return;
   }
 
-  pointer.down = true;
-  pointer.holdStartedAt = millis();
-  pointer.holdTriggered = false;
-  registerPointer(x, y);
+  if (tapGesture.pointerType !== "touch") {
+    tapGesture.lastTapAt = -Infinity;
+    startBirdEvent(now);
+    return;
+  }
+
+  if (
+    now - tapGesture.lastTapAt <= DREAM_PARAMS.doubleTapMs &&
+    Math.hypot(
+      event.clientX - tapGesture.lastTapX,
+      event.clientY - tapGesture.lastTapY,
+    ) <= DREAM_PARAMS.doubleTapDistance
+  ) {
+    tapGesture.lastTapAt = -Infinity;
+    startBirdEvent(now);
+  } else {
+    tapGesture.lastTapAt = now;
+    tapGesture.lastTapX = event.clientX;
+    tapGesture.lastTapY = event.clientY;
+  }
 }
 
-function endPointerHold() {
+function cancelPointerTap() {
   pointer.down = false;
+  tapGesture.pointerId = null;
+  tapGesture.lastTapAt = -Infinity;
 }
 
 function emitRipple(x, y, speed) {
@@ -1111,8 +1173,11 @@ function mouseDragged() {
 }
 
 function touchStarted() {
-  if (touches.length > 0) {
-    startPointerHold(touches[0].x, touches[0].y);
+  if (touches.length === 1) {
+    registerPointer(touches[0].x, touches[0].y);
+  } else if (touches.length > 1) {
+    tapGesture.moved = true;
+    tapGesture.lastTapAt = -Infinity;
   }
   return false;
 }
@@ -1125,11 +1190,11 @@ function touchMoved() {
 }
 
 function touchEnded() {
-  endPointerHold();
   return false;
 }
 
 function windowResized() {
+  cancelPointerTap();
   resizeCanvas(windowWidth, windowHeight);
   pixelDensity(getRenderDensity());
   createLayers();
